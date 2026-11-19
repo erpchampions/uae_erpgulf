@@ -87,7 +87,9 @@ app_include_js = "/assets/uae_erpgulf/js/erpgulf_credits.js"
 
 
 # after_install = "uae_erpgulf.install.after_install"
-before_install = "uae_erpgulf.install.refuse_new_install"
+# MOGAS fork: upstream refused new installs (app superseded by einvoice_erpgulf).
+# This fork is maintained by ERP Champions, so installing is allowed.
+# before_install = "uae_erpgulf.install.refuse_new_install"
 after_install = "uae_erpgulf.uae_erpgulf.providers.sync_provider_options"
 after_migrate = "uae_erpgulf.uae_erpgulf.providers.sync_provider_options"
 
@@ -255,13 +257,13 @@ after_migrate = "uae_erpgulf.uae_erpgulf.providers.sync_provider_options"
 # ignore_translatable_strings_from = []
 
 doctype_js = {
-    "Sales Invoice":[ "public/js/sales_invoice.js",
-                        "public/js/tooltip.js",
-                        "public/js/badge_sales.js"
+    # MOGAS fork: no UAE fields on the invoices; status / buttons / details
+    # dialog come from uae_einvoice_form.js (badges & tooltips removed)
+    "Sales Invoice":[ "public/js/uae_einvoice_form.js",
+                        "public/js/sales_invoice.js",
                 ],
-    "Purchase Invoice":["public/js/purchase.js",
-                        "public/js/tooltip_pos.js",
-                        "public/js/badges_purchase.js"
+    "Purchase Invoice":["public/js/uae_einvoice_form.js",
+                        "public/js/purchase.js",
                 ],
     "E-Invoice Provider Settings": "public/js/e_invoice_provider_settings.js",
     "Supplier": "public/js/marmin_party.js"
@@ -278,12 +280,14 @@ doc_events = {
     "Sales Invoice": {
         "on_submit": "uae_erpgulf.uae_erpgulf.submit_sales.generate_and_send_einvoice",
         "before_submit": "uae_erpgulf.uae_erpgulf.validation.validate_accredited_service_provider",
-        "before_cancel": "uae_erpgulf.uae_erpgulf.validation.block_cancel_if_reported"
+        "before_cancel": "uae_erpgulf.uae_erpgulf.validation.block_cancel_if_reported",
+        "on_trash": "uae_erpgulf.uae_erpgulf.einvoice_record.on_invoice_trash"
     },
     "Purchase Invoice": {
         "on_submit": "uae_erpgulf.uae_erpgulf.send_purchase.generate_and_send_einvoice",
         "before_submit": "uae_erpgulf.uae_erpgulf.validation.validate_accredited_service_provider",
-        "before_cancel": "uae_erpgulf.uae_erpgulf.validation.block_cancel_if_reported"
+        "before_cancel": "uae_erpgulf.uae_erpgulf.validation.block_cancel_if_reported",
+        "on_trash": "uae_erpgulf.uae_erpgulf.einvoice_record.on_invoice_trash"
     }
 }
 fixtures = [

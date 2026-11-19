@@ -6,6 +6,7 @@ import hashlib
 import json
 
 import frappe
+from uae_erpgulf.uae_erpgulf.einvoice_record import find_invoice_by_document_id, load_invoice, set_state
 import requests
 from frappe import _
 from datetime import timedelta
@@ -514,7 +515,7 @@ class MarminAdapter(BaseAdapter):
                     "from."
                 )
             )
-        original_invoice = frappe.get_doc("Sales Invoice", doc.return_against)
+        original_invoice = load_invoice("Sales Invoice", doc.return_against)
         if not original_invoice.custom_document_id:
             frappe.throw(
                 _(
@@ -662,7 +663,7 @@ class MarminAdapter(BaseAdapter):
 
         supplier_doc = frappe.get_doc("Supplier", doc.supplier)
         company_doc = frappe.get_doc("Company", doc.company)
-        original_invoice = frappe.get_doc("Purchase Invoice", doc.return_against)
+        original_invoice = load_invoice("Purchase Invoice", doc.return_against)
 
         payload = {
             "profile_execution_id": MARMIN_PROFILE_EXECUTION_ID_STANDARD,
@@ -1226,11 +1227,13 @@ def marmin_webhook_listener():
         return {"received": False, "error": "signature verification failed"}
 
     
-    sales_invoice_row = frappe.db.get_value(
-        "Sales Invoice", {"custom_document_id": resource_id}, ["name", "is_return"], as_dict=True
+    _si_name = find_invoice_by_document_id("Sales Invoice", resource_id)
+    _pi_name = find_invoice_by_document_id("Purchase Invoice", resource_id)
+    sales_invoice_row = (
+        frappe.db.get_value("Sales Invoice", _si_name, ["name", "is_return"], as_dict=True) if _si_name else None
     )
-    purchase_invoice_row = frappe.db.get_value(
-        "Purchase Invoice", {"custom_document_id": resource_id}, ["name", "is_return"], as_dict=True
+    purchase_invoice_row = (
+        frappe.db.get_value("Purchase Invoice", _pi_name, ["name", "is_return"], as_dict=True) if _pi_name else None
     )
     purchase_invoice_name = purchase_invoice_row.name if purchase_invoice_row else None
 
@@ -1272,20 +1275,10 @@ def marmin_webhook_listener():
 
     if resource_id and reporting_status:
         if sales_invoice_row:
-            frappe.db.set_value(
-                "Sales Invoice",
-                sales_invoice_row.name,
-                "custom_reporting_status",
-                reporting_status,
-            )
+            set_state("Sales Invoice", sales_invoice_row.name, {"reporting_status": reporting_status})
 
         if purchase_invoice_name:
-            frappe.db.set_value(
-                "Purchase Invoice",
-                purchase_invoice_name,
-                "custom_reporting_status",
-                reporting_status,
-            )
+            set_state("Purchase Invoice", purchase_invoice_name, {"reporting_status": reporting_status})
 
     frappe.db.commit()  # nosemgrep: frappe-manual-commit
 

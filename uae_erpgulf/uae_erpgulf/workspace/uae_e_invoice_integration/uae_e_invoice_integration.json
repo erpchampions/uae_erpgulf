@@ -1,7 +1,7 @@
 {
  "app": "erpnext",
  "charts": [],
- "content": "[{\"id\":\"Nxhp0r91R1\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>UAE E-Invoicing Dashboard &amp; Reports</b></span>\",\"col\":12}},{\"id\":\"lHwMOZy6Wb\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Detailed Dashboard\",\"col\":3}},{\"id\":\"1HX0Pt085v\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"New Sales Invoice\",\"col\":4}},{\"id\":\"_JZBBtg-WX\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"New Purchase Invoice\",\"col\":4}},{\"id\":\"b-O49yl_Us\",\"type\":\"card\",\"data\":{\"card_name\":\"UAE E-Invoice Status Reports\",\"col\":5}},{\"id\":\"UOgFJ3vHbK\",\"type\":\"card\",\"data\":{\"card_name\":\"Integration\",\"col\":4}}]",
+ "content": "[{\"id\":\"Nxhp0r91R1\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>UAE E-Invoicing Dashboard &amp; Reports</b></span>\",\"col\":12}},{\"id\":\"lHwMOZy6Wb\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Detailed Dashboard\",\"col\":3}},{\"id\":\"1HX0Pt085v\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Sales E-Invoices\",\"col\":4}},{\"id\":\"_JZBBtg-WX\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Self-billed Purchase E-Invoices\",\"col\":4}},{\"id\":\"b-O49yl_Us\",\"type\":\"card\",\"data\":{\"card_name\":\"UAE E-Invoice Status Reports\",\"col\":5}},{\"id\":\"UOgFJ3vHbK\",\"type\":\"card\",\"data\":{\"card_name\":\"Integration\",\"col\":4}}]",
  "creation": "2026-04-12 18:09:21.611339",
  "custom_blocks": [],
  "docstatus": 0,
@@ -67,10 +67,20 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "UAE E-Invoice Integration Doctypes",
-   "link_count": 0,
+   "link_count": 1,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "UAE E-Invoice Submission",
+   "link_count": 0,
+   "link_to": "UAE E-Invoice Submission",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   },
   {
    "hidden": 0,
@@ -113,14 +123,14 @@
  "public": 1,
  "quick_lists": [
   {
-   "document_type": "Sales Invoice",
-   "label": "New Sales Invoice",
-   "quick_list_filter": "[[\"Sales Invoice\",\"custom_reporting_status\",\"like\",\"%reported%\"]]"
+   "document_type": "UAE E-Invoice Submission",
+   "label": "Sales E-Invoices",
+   "quick_list_filter": "[[\"UAE E-Invoice Submission\", \"reference_doctype\", \"=\", \"Sales Invoice\"]]"
   },
   {
-   "document_type": "Purchase Invoice",
-   "label": "New Purchase Invoice",
-   "quick_list_filter": "[[\"Purchase Invoice\",\"custom_reporting_status\",\"like\",\"%reported%\"]]"
+   "document_type": "UAE E-Invoice Submission",
+   "label": "Self-billed Purchase E-Invoices",
+   "quick_list_filter": "[[\"UAE E-Invoice Submission\", \"reference_doctype\", \"=\", \"Purchase Invoice\"], [\"UAE E-Invoice Submission\", \"submit_to_fta\", \"=\", 1]]"
   }
  ],
  "restrict_to_domain": "",

@@ -46,7 +46,7 @@ def _payment_means_option(code):
     defined"). Returns None if the field or a matching option doesn't exist."""
     if not code:
         return None
-    field = frappe.get_meta("Purchase Invoice").get_field("custom_payment_means_codes")
+    field = frappe.get_meta("UAE E-Invoice Submission").get_field("payment_means_codes")
     if not field:
         return None
 
@@ -129,11 +129,12 @@ def create_purchase_invoice_from_fta(docname: str):
         pi.currency = parsed.get("currency") or "AED"
         # update_stock removed — avoids stock account/warehouse mismatch error
 
-        # Set document identifier if custom field exists
-        if frappe.db.exists("Custom Field", {"dt": "Purchase Invoice", "fieldname": "custom_document_id"}):
-            # Same Document ID as the UAE Incoming Invoices record, so
-            # "Match & Approve" can find it again.
-            pi.custom_document_id = uae_doc.document_id or parsed.get("document_id")
+        # MOGAS fork: UAE values go on the invoice's UAE E-Invoice Submission
+        # record (direction Incoming), written once the draft exists.
+        # Same Document ID as the UAE Incoming Invoices record, so
+        # "Match & Approve" can find it again.
+        uae_state = {"document_id": uae_doc.document_id or parsed.get("document_id")}
+        uae_inputs = {}
 
         # Exchange rate
         if parsed.get("conversion_rate"):
@@ -212,7 +213,7 @@ def create_purchase_invoice_from_fta(docname: str):
         # needs the full option ("1 - Instrument not defined")
         pm_option = _payment_means_option(parsed.get("payment_means_code"))
         if pm_option:
-            pi.custom_payment_means_codes = pm_option
+            uae_inputs["payment_means_codes"] = pm_option
 
         # 9. Insert as Draft only — never 
         if uae_doc.submit_response:
@@ -231,15 +232,20 @@ def create_purchase_invoice_from_fta(docname: str):
             if not isinstance(invoice_status, str):
                 invoice_status = None
             if reporting_status:
-                pi.custom_reporting_status = reporting_status.title()
+                uae_state["reporting_status"] = reporting_status.title()
 
             if invoice_status:
-                pi.custom_uae_einvoice_status = invoice_status.title()
+                uae_state["uae_einvoice_status"] = invoice_status.title()
 
     
         pi.flags.ignore_permissions = True
         pi.flags.ignore_mandatory = True
         pi.insert()
+
+        from uae_erpgulf.uae_erpgulf.einvoice_record import DOCTYPE as UAE_RECORD, ensure_record
+
+        record = ensure_record("Purchase Invoice", pi.name, doc=pi, direction="Incoming")
+        frappe.db.set_value(UAE_RECORD, record, {**uae_inputs, **uae_state})
 
         # 10. Update UAE Incoming Invoice status
         frappe.db.set_value("UAE Incoming Invoices", docname, "status", "Submitted")

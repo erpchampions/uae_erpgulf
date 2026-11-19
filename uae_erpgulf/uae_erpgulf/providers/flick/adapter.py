@@ -2,6 +2,7 @@
 
 import json
 import frappe
+from uae_erpgulf.uae_erpgulf.einvoice_record import find_invoice_by_document_id, set_state
 import requests
 from frappe import _
 from frappe.utils import now_datetime
@@ -451,34 +452,16 @@ def flick_webhook_listener():
         if document_id and reporting_status:
 
             # Sales Invoice
-            sales_invoice = frappe.db.get_value(
-                "Sales Invoice",
-                {"custom_document_id": document_id},
-                "name"
-            )
+            sales_invoice = find_invoice_by_document_id("Sales Invoice", document_id)
 
             if sales_invoice:
-                frappe.db.set_value(
-                    "Sales Invoice",
-                    sales_invoice,
-                    "custom_reporting_status",
-                    reporting_status
-                )
+                set_state("Sales Invoice", sales_invoice, {"reporting_status": reporting_status})
 
             # Purchase Invoice
-            purchase_invoice = frappe.db.get_value(
-                "Purchase Invoice",
-                {"custom_document_id": document_id},
-                "name"
-            )
+            purchase_invoice = find_invoice_by_document_id("Purchase Invoice", document_id)
 
             if purchase_invoice:
-                frappe.db.set_value(
-                    "Purchase Invoice",
-                    purchase_invoice,
-                    "custom_reporting_status",
-                    reporting_status
-                )
+                set_state("Purchase Invoice", purchase_invoice, {"reporting_status": reporting_status})
 
         frappe.db.commit()  # nosemgrep: frappe-manual-commit
 

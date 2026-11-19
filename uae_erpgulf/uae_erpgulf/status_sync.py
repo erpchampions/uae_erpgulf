@@ -4,6 +4,7 @@ import json
 import frappe
 from uae_erpgulf.uae_erpgulf.provider_settings import get_active_provider_settings
 from uae_erpgulf.uae_erpgulf.providers import get_adapter
+from uae_erpgulf.uae_erpgulf.einvoice_record import DOCTYPE as RECORD_DOCTYPE, get_state, load_invoice, set_state
 
 INVOICE_DOCTYPES = ("Sales Invoice", "Purchase Invoice")
 DEFAULT_FINAL_STATUSES = ("reported", "rejected", "failed")
@@ -29,13 +30,11 @@ def attach_missing_documents(doctype, invoice_name):
     messages dropped) so a sync, poll or webhook is never interrupted."""
     from uae_erpgulf.uae_erpgulf.attach import get_document_pdf, get_document_xml
 
-    current = frappe.db.get_value(
-        doctype, invoice_name, ["custom_document_xml", "custom_document_pdf"], as_dict=True
-    ) or {}
+    current = get_state(doctype, invoice_name, ["document_xml", "document_pdf"])
 
     for attached_field, fetch_fn in (
-        ("custom_document_xml", get_document_xml),
-        ("custom_document_pdf", get_document_pdf),
+        ("document_xml", get_document_xml),
+        ("document_pdf", get_document_pdf),
     ):
         if current.get(attached_field):
             continue
@@ -50,7 +49,7 @@ def refresh_invoice_status(doctype, invoice_name):
     """Same steps as the Get Status button: ask the adapter, store the
     response, set custom_reporting_status. Once reported, attach any missing
     XML / PDF. Returns the status (lower case) or None."""
-    doc = frappe.get_doc(doctype, invoice_name)
+    doc = load_invoice(doctype, invoice_name)
     adapter = _adapter_for(doc)
 
     result = adapter.get_document_status(doctype, doc)
@@ -59,7 +58,10 @@ def refresh_invoice_status(doctype, invoice_name):
     else:
         body = result
 
-    doc.db_set("custom_document_status_response", json.dumps(body, default=str), update_modified=False)
+    set_state(
+        doctype, invoice_name, {"document_status_response": json.dumps(body, default=str)},
+        doc=doc, update_modified=False,
+    )
 
     status = result.get("reporting_status") if isinstance(result, dict) else None
     if not status:
@@ -67,7 +69,7 @@ def refresh_invoice_status(doctype, invoice_name):
     status = (status or "").strip().lower() or None
 
     if status and status != (doc.get("custom_reporting_status") or "").lower():
-        doc.db_set("custom_reporting_status", status)
+        set_state(doctype, invoice_name, {"reporting_status": status}, doc=doc)
 
     if status == "reported" and _flag(adapter, "ATTACH_DOCUMENTS_IN_SYNC", True):
         attach_missing_documents(doctype, invoice_name)
@@ -83,22 +85,29 @@ def sync_pending_invoices():
     since = frappe.utils.add_days(frappe.utils.nowdate(), -SYNC_LOOKBACK_DAYS)
 
     for doctype in INVOICE_DOCTYPES:
-        rows = frappe.get_all(
-            doctype,
-            filters={
-                "docstatus": 1,
-                "custom_document_id": ["is", "set"],
-                "posting_date": [">=", since],
-            },
-            or_filters=[
-                [doctype, "custom_reporting_status", "is", "not set"],
-                [doctype, "custom_reporting_status", "not in", list(DEFAULT_FINAL_STATUSES)],
-                [doctype, "custom_document_xml", "is", "not set"],
-                [doctype, "custom_document_pdf", "is", "not set"],
-            ],
-            fields=["name", "custom_reporting_status", "custom_document_xml", "custom_document_pdf"],
-            order_by="modified asc",
-            limit=SYNC_BATCH_SIZE,
+        # MOGAS fork: state lives on UAE E-Invoice Submission. Incoming
+        # (imported supplier) invoices are not ours to poll.
+        rows = frappe.db.sql(
+            f"""
+            SELECT r.reference_name AS name, r.reporting_status AS custom_reporting_status
+            FROM `tab{RECORD_DOCTYPE}` r
+            INNER JOIN `tab{doctype}` inv ON inv.name = r.reference_name
+            WHERE r.reference_doctype = %(doctype)s
+              AND IFNULL(r.direction, 'Outgoing') = 'Outgoing'
+              AND IFNULL(r.document_id, '') NOT IN ('', 'Not Submitted')
+              AND inv.docstatus = 1
+              AND inv.posting_date >= %(since)s
+              AND (
+                IFNULL(r.reporting_status, '') = ''
+                OR LOWER(r.reporting_status) NOT IN %(final)s
+                OR IFNULL(r.document_xml, '') = ''
+                OR IFNULL(r.document_pdf, '') = ''
+              )
+            ORDER BY r.modified ASC
+            LIMIT %(limit)s
+            """,
+            {"doctype": doctype, "since": since, "final": DEFAULT_FINAL_STATUSES, "limit": SYNC_BATCH_SIZE},
+            as_dict=True,
         )
 
         for row in rows:

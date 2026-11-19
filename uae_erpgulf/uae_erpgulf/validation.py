@@ -8,6 +8,11 @@ def validate_company_provider(doc, method=None):
     """Company.validate: the chosen Accredited Service Provider must have an
     adapter registered in hooks.py. Refuse here, on the Company form,
     rather than later on Provider Settings or at invoice submit."""
+    # MOGAS fork: only for UAE-enabled companies. The Select has no blank
+    # option, so every new Company (any country) gets its first option, which
+    # has no adapter - upstream then blocked creating any company.
+    if not doc.get("custom_uae_einvoice_enabled"):
+        return
     provider = doc.get("custom_accredited_service_providers")
     if provider:
         assert_provider_registered(provider)
@@ -16,8 +21,13 @@ def block_cancel_if_reported(doc, method=None):
     """before_cancel on Sales / Purchase Invoice: an invoice that reached the
     FTA (or is on its way) cannot be cancelled in ERPNext; the only valid
     reversal is a credit / debit note that is itself reported."""
-    reporting = (doc.get("custom_reporting_status") or "").strip().lower()
-    einvoice = (doc.get("custom_uae_einvoice_status") or "").strip().lower()
+    from uae_erpgulf.uae_erpgulf.einvoice_record import get_state, is_uae_company
+
+    if not is_uae_company(doc.company):
+        return
+    state = get_state(doc.doctype, doc.name, ["reporting_status", "uae_einvoice_status"])
+    reporting = (state.reporting_status or "").strip().lower()
+    einvoice = (state.uae_einvoice_status or "").strip().lower()
 
     # Never accepted by the FTA -> safe to cancel
     if reporting in ("failed", "rejected"):

@@ -1,0 +1,310 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-11-19 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "description": "UAE e-invoicing data for one Sales / Purchase Invoice. Holds what used to be custom fields on the invoice, so the invoice doctypes stay untouched.",
+ "field_order": [
+  "reference_doctype",
+  "reference_name",
+  "direction",
+  "column_break_ref",
+  "company",
+  "posting_date",
+  "party",
+  "is_return",
+  "section_details",
+  "submit_to_fta",
+  "vat_category",
+  "vat_exemption_reason_code",
+  "rcm_nature_code",
+  "invoice_transaction_type_code",
+  "payment_means_codes",
+  "column_break_details",
+  "frequency_billing_code_list",
+  "invoice_note",
+  "credit_note_reason_code",
+  "return_against_for_uae_einvoice",
+  "skip_validation_for_credit_note",
+  "section_status",
+  "uae_einvoice_status",
+  "reporting_status",
+  "column_break_status",
+  "document_id",
+  "document_xml",
+  "document_pdf",
+  "section_responses",
+  "submit_response",
+  "column_break_resp",
+  "document_status_response"
+ ],
+ "fields": [
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Invoice Type",
+   "options": "DocType",
+   "reqd": 1,
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Invoice",
+   "options": "reference_doctype",
+   "reqd": 1,
+   "read_only": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "label": "Direction",
+   "options": "Outgoing\nIncoming",
+   "default": "Outgoing",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_ref",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Posting Date",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "party",
+   "fieldtype": "Data",
+   "label": "Customer / Supplier",
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_return",
+   "fieldtype": "Check",
+   "label": "Is Return (Credit Note)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_details",
+   "fieldtype": "Section Break",
+   "label": "E-Invoice Details"
+  },
+  {
+   "fieldname": "submit_to_fta",
+   "fieldtype": "Check",
+   "label": "Submit To FTA (Self-billed)",
+   "depends_on": "eval:doc.reference_doctype==\"Purchase Invoice\"",
+   "description": "Purchase Invoices are only sent to the ASP when this is ticked (self-billing)."
+  },
+  {
+   "fieldname": "vat_category",
+   "fieldtype": "Select",
+   "label": "VAT Category",
+   "options": "S - Standard rated\nZ - Zero rated\nE - Exempt from tax\nAE - VAT Reverse Charge\nO - Not subject to VAT\nN - Margin scheme",
+   "description": "Invoice-level default. A line's Item Tax Template VAT Category wins over this."
+  },
+  {
+   "fieldname": "vat_exemption_reason_code",
+   "fieldtype": "Select",
+   "label": "VAT Exemption Reason Code",
+   "options": "\nDL8.46.1 - Certain financial services\nDL8.46.2 - Supply of residential units (lease or sale)\nDL8.46.3 - Bare land\nDL8.46.4 - Local passenger transport",
+   "depends_on": "eval:doc.vat_category==\"E - Exempt from tax\""
+  },
+  {
+   "fieldname": "rcm_nature_code",
+   "fieldtype": "Select",
+   "label": "RCM Nature Code",
+   "options": "\nDL8.48.8.2 - Electronic Devices\nDL8.48.8.1 - Gold and Diamonds\nDL8.48.3.1 - Crude or refined oil\nDL8.48.3.2 - Unprocessed or processed natural gas\nDL8.48.3.3 - Pure hydrocarbons",
+   "depends_on": "eval:doc.vat_category==\"AE - VAT Reverse Charge\""
+  },
+  {
+   "fieldname": "invoice_transaction_type_code",
+   "fieldtype": "Select",
+   "label": "Invoice Transaction Type Code",
+   "options": "\n1XXXXXX : Free trade zone transaction\nX1XXXXX : Deemed supply transaction\nXX1XXXX : Margin scheme transaction\nXXX1XXX : Summary tax invoice\nXXXX1XX : Continuous / repeated supply\nXXXXX1X : Disclosed agent billing\nXXXXXX1 : E-commerce supply\nXXXXXXX1 : Export transaction"
+  },
+  {
+   "fieldname": "payment_means_codes",
+   "fieldtype": "Select",
+   "label": "Payment Means Codes",
+   "options": "\n1 - Instrument not defined\n10 - Cash\n20 - Cheque\n30 - Credit transfer\n31 - Debit transfer\n42 - Payment to bank account\n48 - Bank card\n49 - Direct debit\n55 - Debit card\n58 - SEPA credit transfer",
+   "depends_on": "eval:doc.reference_doctype==\"Purchase Invoice\""
+  },
+  {
+   "fieldname": "column_break_details",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "frequency_billing_code_list",
+   "fieldtype": "Select",
+   "label": "Frequency Billing Code",
+   "options": "\nDLY\nWKY\nQ15\nMTH\nQ45\nQ60\nQTR\nHYR\nYRL\nOTH"
+  },
+  {
+   "fieldname": "invoice_note",
+   "fieldtype": "Data",
+   "label": "Invoice Note",
+   "mandatory_depends_on": "eval:doc.frequency_billing_code_list==\"OTH\""
+  },
+  {
+   "fieldname": "credit_note_reason_code",
+   "fieldtype": "Select",
+   "label": "Credit Note Reason Code",
+   "options": "\nDL8.61.1.A-Cancellation\nDL8.61.1.B-Amendment\nDL8.61.1.C-Supplier\nDL8.61.1.D-Buyer\nDL8.61.1.E-Amounts\nVD-Void",
+   "depends_on": "eval:doc.is_return"
+  },
+  {
+   "fieldname": "return_against_for_uae_einvoice",
+   "fieldtype": "Data",
+   "label": "Original Invoice No. (not in ERPNext)",
+   "depends_on": "eval:doc.is_return",
+   "description": "For a credit note whose original invoice is not in this system (Company setting must allow it)."
+  },
+  {
+   "fieldname": "skip_validation_for_credit_note",
+   "fieldtype": "Check",
+   "label": "Skip Return Item Validation",
+   "depends_on": "eval:doc.is_return"
+  },
+  {
+   "fieldname": "section_status",
+   "fieldtype": "Section Break",
+   "label": "FTA Status"
+  },
+  {
+   "fieldname": "uae_einvoice_status",
+   "fieldtype": "Data",
+   "label": "UAE E-Invoice Status",
+   "default": "Not Submitted",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reporting_status",
+   "fieldtype": "Data",
+   "label": "Reporting Status",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "document_id",
+   "fieldtype": "Data",
+   "label": "Document ID",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "document_xml",
+   "fieldtype": "Data",
+   "label": "Document XML",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_pdf",
+   "fieldtype": "Data",
+   "label": "Document PDF",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_responses",
+   "fieldtype": "Section Break",
+   "label": "Integration Responses",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "submit_response",
+   "fieldtype": "Long Text",
+   "label": "Submit Response",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_resp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "document_status_response",
+   "fieldtype": "Long Text",
+   "label": "Document Status Response",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-19 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "uae_erpgulf",
+ "name": "UAE E-Invoice Submission",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1,
+   "delete": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1,
+   "delete": 0
+  },
+  {
+   "role": "Accounts User",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1,
+   "delete": 0
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "reference_name",
+ "show_title_field_in_link": 0,
+ "track_changes": 1
+}

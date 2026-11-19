@@ -9,6 +9,7 @@ from uae_erpgulf.uae_erpgulf.provider_settings import (
 	save_last_response,
 )
 from uae_erpgulf.uae_erpgulf.providers import get_adapter
+from uae_erpgulf.uae_erpgulf.einvoice_record import load_invoice, set_state
 
 
 def get_auth_headers(settings, extra=None):
@@ -71,7 +72,8 @@ get_valid_flick_token = get_valid_token
 def get_document_status(invoice_name: str):
 	"""Fetch document status from this company's active provider."""
 	try:
-		sales_invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+		sales_invoice_doc = load_invoice("Sales Invoice", invoice_name)
+		sales_invoice_doc.check_permission("read")
 		settings = get_active_provider_settings(sales_invoice_doc.company)
 		adapter = get_adapter(settings)
 
@@ -87,17 +89,14 @@ def get_document_status(invoice_name: str):
 			body = result
 
 		
-		sales_invoice_doc.db_set(
-			"custom_document_status_response",
-			json.dumps(body)
-		)
+		set_state("Sales Invoice", invoice_name, {"document_status_response": json.dumps(body)}, doc=sales_invoice_doc)
 
 		
 		reporting_status = result.get("reporting_status") if isinstance(result, dict) else None
 		if not reporting_status:
 			reporting_status = adapter.get_status_from_document_status(body)
 		if reporting_status:
-			sales_invoice_doc.db_set("custom_reporting_status", reporting_status)
+			set_state("Sales Invoice", invoice_name, {"reporting_status": reporting_status}, doc=sales_invoice_doc)
 
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit
 

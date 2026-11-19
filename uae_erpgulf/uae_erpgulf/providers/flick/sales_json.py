@@ -1,5 +1,6 @@
 """Flick only - builds the PEPPOL-style JSON body Flick expects for a Sales Invoice."""
 import frappe
+from uae_erpgulf.uae_erpgulf.einvoice_record import load_invoice
 import re
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
@@ -686,7 +687,7 @@ def add_credit_note_details(invoice_doc, invoice_json):
 
 def build_uae_invoice_json(invoice_number):
     """Builds the UAE / PEPPOL compliant JSON invoice payload from the Sales Invoice document."""
-    sales_invoice_doc = frappe.get_doc("Sales Invoice", invoice_number)
+    sales_invoice_doc = load_invoice("Sales Invoice", invoice_number)
     company_doc = frappe.get_doc("Company", sales_invoice_doc.company)
     if company_doc.custom_uae_einvoice_enabled !=1 :
         frappe.throw(_("UAE E-invoicing not Enabled....pls enable to submit PEPPOL"))

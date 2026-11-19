@@ -5,6 +5,7 @@ from frappe import _
 from uae_erpgulf.uae_erpgulf.provider_settings import get_active_provider_settings
 from uae_erpgulf.uae_erpgulf.providers import get_adapter
 from frappe.utils.file_manager import save_file
+from uae_erpgulf.uae_erpgulf.einvoice_record import load_invoice, set_state
 
 
 @frappe.whitelist()
@@ -12,7 +13,7 @@ def get_document_xml(doctype: str, invoice_name: str):
     """Fetch the submitted document's XML from whichever ASP this company
     is active on, and save it against the Invoice."""
     try:
-        doc = frappe.get_doc(doctype, invoice_name)
+        doc = load_invoice(doctype, invoice_name)
         settings = get_active_provider_settings(doc.company)
         adapter = get_adapter(settings)
 
@@ -36,7 +37,7 @@ def get_document_xml(doctype: str, invoice_name: str):
             is_private=1
         )
 
-        doc.db_set("custom_document_xml", file_doc.file_url)
+        set_state(doctype, doc.name, {"document_xml": file_doc.file_url}, doc=doc)
         frappe.db.commit()
 
         return {
@@ -59,7 +60,7 @@ def get_document_pdf(doctype: str, invoice_name: str):
     """Fetch the submitted document's PDF from whichever ASP this company
     is active on, and save it against the Invoice."""
     try:
-        doc = frappe.get_doc(doctype, invoice_name)
+        doc = load_invoice(doctype, invoice_name)
         settings = get_active_provider_settings(doc.company)
         adapter = get_adapter(settings)
 
@@ -82,7 +83,7 @@ def get_document_pdf(doctype: str, invoice_name: str):
             is_private=1
         )
 
-        doc.db_set("custom_document_pdf", file_doc.file_url)
+        set_state(doctype, doc.name, {"document_pdf": file_doc.file_url}, doc=doc)
         frappe.db.commit()
 
         return {

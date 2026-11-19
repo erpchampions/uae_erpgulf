@@ -8,6 +8,7 @@ from uae_erpgulf.uae_erpgulf.providers import get_adapter
 from uae_erpgulf.uae_erpgulf.attach import get_document_xml
 from uae_erpgulf.uae_erpgulf.attach import get_document_pdf
 from uae_erpgulf.uae_erpgulf.validation import success_log
+from uae_erpgulf.uae_erpgulf.einvoice_record import ensure_record, hydrate, get_state, load_invoice, set_state
 def send_invoice_to_provider(doc, method=None):
     """On Purchase Invoice Submit and after JSON generation, send it"""
 
@@ -56,11 +57,28 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
         doc = frappe.parse_json(doc)
 
     if isinstance(doc, dict):
-        doc = frappe.get_doc(doc)
+        # from the form button: always work on the saved invoice
+        doc = frappe.get_doc(doc.get("doctype") or "Purchase Invoice", doc.get("name"))
     if doc.doctype != "Purchase Invoice":
         return
     if not frappe.db.get_value("Company", doc.company, "custom_uae_einvoice_enabled"):
         return  # UAE e-invoicing is switched off for this company
+    if method is None:
+        doc.check_permission("submit")
+
+    # MOGAS fork: UAE data lives in "UAE E-Invoice Submission", not on the invoice
+    ensure_record("Purchase Invoice", doc.name, doc=doc)
+    hydrate(doc)
+
+    # Only self-billed purchase invoices go to the ASP. Upstream sent every
+    # Purchase Invoice of a UAE company (only the Flick builder checked this
+    # flag), which would report ordinary supplier bills as self-billed.
+    if not doc.get("custom_submit_to_fta"):
+        if method is None:
+            frappe.throw(_(
+                "Tick 'Submit To FTA (Self-billed)' in the UAE E-Invoice details of {0} first."
+            ).format(doc.name))
+        return
 
     try:
         settings = get_active_provider_settings(doc.company)
@@ -78,7 +96,7 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
         exchange_status = parsed.get("exchange_status")
         invoice_status = "Success" if parsed.get("success") else "Not Submitted"
 
-        doc.db_set("custom_submit_response", response_text)
+        set_state("Purchase Invoice", doc.name, {"submit_response": response_text}, doc=doc)
         if status_code in (200, 201) and getattr(
             adapter, "AUTO_FETCH_DOCUMENTS_ON_SUBMIT", True
         ):
@@ -108,14 +126,14 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
                             )
                         elif retry_delay_seconds:
                             time.sleep(retry_delay_seconds)
-        doc.db_set("custom_uae_einvoice_status", invoice_status)
-        
         if not reporting_status and invoice_status == "Success":
             reporting_status = "pending"
+        state = {"uae_einvoice_status": invoice_status}
         if reporting_status:
-            doc.db_set("custom_reporting_status", reporting_status)
+            state["reporting_status"] = reporting_status
         if document_id:
-            doc.db_set("custom_document_id", document_id)
+            state["document_id"] = document_id
+        set_state("Purchase Invoice", doc.name, state, doc=doc)
         frappe.db.commit()
         if status_code in (200, 201):
             success_log(
@@ -151,22 +169,26 @@ def bulk_send_invoices(invoices: list | str):
         try:
             # Load documents
             doc = frappe.get_doc("Purchase Invoice", invoice)
+            doc.check_permission("submit")
             company_doc = frappe.get_doc("Company", doc.company)
 
-            status = doc.custom_uae_einvoice_status
+            state = get_state("Purchase Invoice", invoice, ["uae_einvoice_status", "submit_to_fta"])
+            status = state.uae_einvoice_status
 
-            # Skip already submitted invoices
-            if status == "Success":
+            # Skip already submitted invoices, and ones not marked self-billed
+            if status == "Success" or not state.submit_to_fta:
                 skipped.append(invoice)
                 continue
 
-            # If invoice is Draft → Submit first
+            # Draft -> submit; on_submit sends it (upstream then sent it a
+            # second time here)
             if doc.docstatus == 0 and company_doc.custom_uae_einvoice_enabled == 1:
                 doc.submit()
+                success.append(invoice)
 
-            # If invoice is Submitted → Send to FTA
-            if doc.docstatus == 1 and company_doc.custom_uae_einvoice_enabled == 1:
-                generate_and_send_einvoice(doc)
+            # Already submitted -> send
+            elif doc.docstatus == 1 and company_doc.custom_uae_einvoice_enabled == 1:
+                generate_and_send_einvoice(doc, method="bulk")
                 success.append(invoice)
 
         except Exception as e:
@@ -187,7 +209,8 @@ def get_document_status(invoice_name: str):
     """Fetch document status from this company's active provider and save
     the response in the Purchase Invoice."""
     try:
-        purchase_invoice_doc = frappe.get_doc("Purchase Invoice", invoice_name)
+        purchase_invoice_doc = load_invoice("Purchase Invoice", invoice_name)
+        purchase_invoice_doc.check_permission("read")
         settings = get_active_provider_settings(purchase_invoice_doc.company)
         adapter = get_adapter(settings)
 
@@ -199,16 +222,13 @@ def get_document_status(invoice_name: str):
             http_status = None
             body = result
 
-        purchase_invoice_doc.db_set(
-            "custom_document_status_response",
-            json.dumps(body)
-        )
+        set_state("Purchase Invoice", invoice_name, {"document_status_response": json.dumps(body)}, doc=purchase_invoice_doc)
 
         reporting_status = result.get("reporting_status") if isinstance(result, dict) else None
         if not reporting_status:
             reporting_status = adapter.get_status_from_document_status(body)
         if reporting_status:
-            purchase_invoice_doc.db_set("custom_reporting_status", reporting_status)
+            set_state("Purchase Invoice", invoice_name, {"reporting_status": reporting_status}, doc=purchase_invoice_doc)
 
         return {"http_status": http_status, "response": body}
     except Exception as e:

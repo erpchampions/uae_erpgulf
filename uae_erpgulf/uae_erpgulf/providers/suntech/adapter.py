@@ -4,6 +4,7 @@ import json
 from decimal import ROUND_HALF_UP, Decimal
 
 import frappe
+from uae_erpgulf.uae_erpgulf.einvoice_record import find_invoice_by_document_id, get_state, set_state
 import requests
 from frappe import _
 from frappe.utils import now_datetime, strip_html
@@ -749,13 +750,11 @@ def _attach_documents_if_ready(doctype, invoice_name, body):
 
     from uae_erpgulf.uae_erpgulf.attach import get_document_pdf, get_document_xml
 
-    current = frappe.db.get_value(
-        doctype, invoice_name, ["custom_document_xml", "custom_document_pdf"], as_dict=True
-    ) or {}
+    current = get_state(doctype, invoice_name, ["document_xml", "document_pdf"])
 
     for path_field, attached_field, fetch_fn in (
-        ("invoice_xml_location_path", "custom_document_xml", get_document_xml),
-        ("pdf_location_path", "custom_document_pdf", get_document_pdf),
+        ("invoice_xml_location_path", "document_xml", get_document_xml),
+        ("pdf_location_path", "document_pdf", get_document_pdf),
     ):
         if not body.get(path_field) or current.get(attached_field):
             continue
@@ -839,10 +838,10 @@ def suntech_webhook_listener():
 
     if invoice_id:
         for doctype in ("Sales Invoice", "Purchase Invoice"):
-            name = frappe.db.get_value(doctype, {"custom_document_id": invoice_id}, "name")
+            name = find_invoice_by_document_id(doctype, invoice_id)
             if name:
                 if reporting_status:
-                    frappe.db.set_value(doctype, name, "custom_reporting_status", reporting_status)
+                    set_state(doctype, name, {"reporting_status": reporting_status})
                 _attach_documents_if_ready(doctype, name, body)
 
     # A supplier invoice delivered to us -> keep it in UAE Incoming Invoices

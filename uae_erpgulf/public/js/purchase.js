@@ -1,198 +1,35 @@
+// Purchase Invoice - UAE e-invoicing (MOGAS fork).
+// Status, ASP buttons and the "E-Invoice Details" dialog come from
+// uae_einvoice_form.js; nothing here touches invoice fields, and every UAE
+// button is limited to companies with UAE e-invoicing enabled.
 frappe.ui.form.on("Purchase Invoice", {
     refresh(frm) {
+        uae_erpgulf_einvoice.refresh(frm).then((info) => {
+            if (info.enabled && frm.doc.docstatus !== 2) {
+                const document_id = (info.values || {}).document_id;
+                frm.add_custom_button(__('Match & Approve'), function () {
+                    match_and_approve_fta(frm, document_id);
+                }, __("UAE E-Invoice"));
+                if (document_id) {
+                    check_fta_match_status(frm, document_id);
+                }
+            }
+        });
 
-        frm.clear_custom_buttons();
-
-        if (
-            frm.doc.docstatus === 1 &&
-            (
-                frm.doc.custom_uae_einvoice_status === "Not Submitted" ||
-                frm.doc.custom_reporting_status === "failed"
-            )
-        ) {
-
-            frm.add_custom_button(
-                __("Send Invoice"),
-                () => {
-
-                    frm.call({
-                        method: "uae_erpgulf.uae_erpgulf.send_purchase.generate_and_send_einvoice",
-                        args: {
-                            doc: frm.doc
-                        },
-                        freeze: true,
-                        freeze_message: __("Generating and sending UAE E-Invoice..."),
-                        callback(r) {
-                            if (!r.exc) {
-                                frappe.msgprint(__("UAE E-Invoice processed successfully"));
-                                frm.reload_doc();
-                            }
-                        }
-                    });
-
-                },
-                __("UAE E-Invoice")
-            );
+        // import of supplier invoices received through the ASP
+        if (frm.doc.company) {
+            frappe.db.get_value("Company", frm.doc.company, "custom_uae_einvoice_enabled").then((r) => {
+                if (cint((r.message || {}).custom_uae_einvoice_enabled)) {
+                    frm.add_custom_button(__('Get FTA Incoming Invoices'), function () {
+                        get_fta_incoming_invoices(frm);
+                    }, __('Get Items From'));
+                }
+            });
         }
-    }
-});
-frappe.ui.form.on("Purchase Invoice", {
-    refresh: function (frm) {
-        if (!frm.doc.__islocal && frm.doc.custom_uae_einvoice_status !== "Not Submitted") {
-
-            // Hide Get Document Status once reported
-            const is_reported = (frm.doc.custom_reporting_status || "").toLowerCase() === "reported";
-
-            if (!is_reported) {
-                frm.add_custom_button(__('Get Document Status'), function () {
-                    frappe.call({
-                        method: "uae_erpgulf.uae_erpgulf.send_purchase.get_document_status",
-                        args: {
-                            invoice_name: frm.doc.name
-                        },
-                        freeze: true,
-                        freeze_message: __("Checking Document Status..."),
-                        callback: function (r) {
-                            if (r.message) {
-
-                                const envelope = r.message;
-                                const httpStatus =
-                                    envelope && typeof envelope === "object" && "http_status" in envelope
-                                        ? envelope.http_status
-                                        : undefined;
-                                const res =
-                                    envelope && typeof envelope === "object" && "response" in envelope
-                                        ? envelope.response
-                                        : envelope;
-
-                                const isArray = Array.isArray(res);
-                                const isObject = res && typeof res === "object" && !isArray;
-                                const primary = isArray ? (res[res.length - 1] || {}) : (isObject ? res : {});
-                                const nested = (primary && typeof primary === "object" && primary.data && typeof primary.data === "object")
-                                    ? primary.data
-                                    : {};
-
-                                const findKeyLike = (obj, patterns) => {
-                                    if (!obj || typeof obj !== "object") return undefined;
-                                    const keys = Object.keys(obj);
-                                    for (const p of patterns) {
-                                        for (const key of keys) {
-                                            if (p.test(key)) {
-                                                const value = obj[key];
-                                                if (value !== undefined && value !== null && value !== "") {
-                                                    return value;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    return undefined;
-                                };
-
-                                const documentId =
-                                    findKeyLike(primary, [/^id$/i]) ??
-                                    findKeyLike(nested, [/^id$/i]) ??
-                                    "-";
-                                const status =
-                                    findKeyLike(primary, [/status/i]) ??
-                                    findKeyLike(nested, [/status/i]) ??
-                                    "-";
-
-                                const rawJson = frappe.utils.escape_html(JSON.stringify(res, null, 2));
-
-                                const isHttpSuccess =
-                                    typeof httpStatus === "number" && httpStatus >= 200 && httpStatus < 300;
-                                const indicator = !isHttpSuccess
-                                    ? "red"
-                                    : (status === "reported" ? "green" : "orange");
-
-                                const html = `
-                                    <p><b>HTTP Status:</b> ${frappe.utils.escape_html(String(httpStatus ?? "-"))}</p>
-                                    <p><b>Document ID:</b> ${frappe.utils.escape_html(String(documentId))}</p>
-                                    <p><b>Status:</b> ${frappe.utils.escape_html(String(status))}</p>
-                                    <p style="margin-top:12px;"><b>Response</b></p>
-                                    <pre style="white-space:pre-wrap;background:#f6f8fa;padding:12px;border-radius:6px;max-height:400px;overflow:auto;font-size:12px;">${rawJson}</pre>
-                                `;
-
-                                frappe.msgprint({
-                                    title: __("Document Status"),
-                                    message: html,
-                                    indicator: indicator,
-                                    wide: true
-                                });
-
-                                frm.reload_doc();
-                            }
-                        }
-                    });
-                });
-            }
-
-            // Hide XML / PDF buttons if already attached
-            const attachments = (frm.get_docinfo() && frm.get_docinfo().attachments) || [];
-            const has_ext = (ext) => attachments.some(a =>
-                ((a.file_name || a.file_url || "").toLowerCase()).endsWith(ext)
-            );
-            const has_xml = has_ext(".xml");
-            const has_pdf = has_ext(".pdf");
-
-            if (!has_xml) {
-                frm.add_custom_button(__('XML'), function () {
-                    frappe.call({
-                        method: "uae_erpgulf.uae_erpgulf.attach.get_document_xml",
-                        args: {
-                            doctype: "Purchase Invoice",
-                            invoice_name: frm.doc.name
-                        },
-                        freeze: true,
-                        freeze_message: __("Fetching Document XML..."),
-                        callback: function (r) {
-                            if (r.message && r.message.file_url) {
-                                frappe.msgprint({
-                                    title: __("Document XML"),
-                                    message: `<p>XML fetched and attached to this invoice.</p><p><a href="${r.message.file_url}" target="_blank">${__("Open XML")}</a></p>`,
-                                    indicator: "green"
-                                });
-                                frm.reload_doc();
-                            }
-                        }
-                    });
-                }, __('Get Document'));
-            }
-
-            if (!has_pdf) {
-                frm.add_custom_button(__('PDF'), function () {
-                    frappe.call({
-                        method: "uae_erpgulf.uae_erpgulf.attach.get_document_pdf",
-                        args: {
-                            doctype: "Purchase Invoice",
-                            invoice_name: frm.doc.name
-                        },
-                        freeze: true,
-                        freeze_message: __("Fetching Document PDF..."),
-                        callback: function (r) {
-                            if (r.message && r.message.file_url) {
-                                frappe.msgprint({
-                                    title: __("Document PDF"),
-                                    message: `<p>PDF fetched and attached to this invoice.</p><p><a href="${r.message.file_url}" target="_blank">${__("Open PDF")}</a></p>`,
-                                    indicator: "green"
-                                });
-                                frm.reload_doc();
-                            }
-                        }
-                    });
-                }, __('Get Document'));
-            }
-        }
-    }
-});
-
-
-frappe.ui.form.on('Purchase Invoice', {
-    refresh: function (frm) {
-        frm.add_custom_button(__('Get FTA Incoming Invoices'), function () {
-            get_fta_incoming_invoices(frm);
-        }, __('Get Items From'));
-    }
+    },
+    before_submit(frm) {
+        return uae_erpgulf_einvoice.before_submit(frm);
+    },
 });
 
 function get_fta_incoming_invoices(frm) {
@@ -429,22 +266,8 @@ function process_invoices_sequentially(rows, index, results, dialog, frm) {
 
 
 
-frappe.ui.form.on('Purchase Invoice', {
-    refresh: function (frm) {
-        if (frm.doc.docstatus !== 2) {
-            frm.add_custom_button(__('Match & Approve'), function () {
-                match_and_approve_fta(frm);
-            });
-
-            if (frm.doc.custom_document_id) {
-                check_fta_match_status(frm);
-            }
-        }
-    }
-});
-
-function match_and_approve_fta(frm) {
-    if (!frm.doc.custom_document_id) {
+function match_and_approve_fta(frm, document_id) {
+    if (!document_id) {
         frappe.msgprint({
             title: __('Missing Document ID'),
             message: __('This Purchase Invoice has no FTA Document ID to match against.'),
@@ -457,16 +280,16 @@ function match_and_approve_fta(frm) {
         method: 'frappe.client.get_list',
         args: {
             doctype: 'UAE Incoming Invoices',
-            filters: { document_id: frm.doc.custom_document_id },
+            filters: { document_id: document_id },
             fields: ['name', 'document_id', 'status']
         },
         callback: function (r) {
             if (r.message && r.message.length > 0) {
                 let fta_doc = r.message[0];
 
-                if (fta_doc.document_id === frm.doc.custom_document_id) {
+                if (fta_doc.document_id === document_id) {
                     frm.dashboard.set_headline(
-                        '<span class="indicator green">✅ Matched & Approved by FTA — Document ID: ' + frm.doc.custom_document_id + '</span>'
+                        '<span class="indicator green">✅ Matched & Approved by FTA — Document ID: ' + document_id + '</span>'
                     );
 
                     frappe.show_alert({
@@ -499,7 +322,7 @@ function match_and_approve_fta(frm) {
             } else {
                 frappe.msgprint({
                     title: __('No FTA Match Found'),
-                    message: __('No UAE Incoming Invoice found with Document ID: <b>' + frm.doc.custom_document_id + '</b>'),
+                    message: __('No UAE Incoming Invoice found with Document ID: <b>' + document_id + '</b>'),
                     indicator: 'red'
                 });
             }
@@ -507,20 +330,20 @@ function match_and_approve_fta(frm) {
     });
 }
 
-function check_fta_match_status(frm) {
+function check_fta_match_status(frm, document_id) {
     frappe.call({
         method: 'frappe.client.get_list',
         args: {
             doctype: 'UAE Incoming Invoices',
-            filters: { document_id: frm.doc.custom_document_id },
+            filters: { document_id: document_id },
             fields: ['name', 'document_id', 'status']
         },
         callback: function (r) {
             if (r.message && r.message.length > 0) {
                 let fta_doc = r.message[0];
-                if (fta_doc.document_id === frm.doc.custom_document_id) {
+                if (fta_doc.document_id === document_id) {
                     frm.dashboard.set_headline(
-                        '<span class="indicator green">✅ Matched & Approved by FTA — Document ID: ' + frm.doc.custom_document_id + '</span>'
+                        '<span class="indicator green">✅ Matched & Approved by FTA — Document ID: ' + document_id + '</span>'
                     );
                 }
             }

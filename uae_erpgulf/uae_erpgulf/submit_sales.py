@@ -8,6 +8,7 @@ from uae_erpgulf.uae_erpgulf.providers import get_adapter
 from uae_erpgulf.uae_erpgulf.attach import get_document_xml
 from uae_erpgulf.uae_erpgulf.attach import get_document_pdf
 from uae_erpgulf.uae_erpgulf.validation import success_log
+from uae_erpgulf.uae_erpgulf.einvoice_record import ensure_record, hydrate, get_state, set_state
 
 def send_invoice_to_provider(doc, method=None):
     """ On Sales Invoice Submit and after JSON generation """
@@ -54,11 +55,18 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
         doc = frappe.parse_json(doc)
 
     if isinstance(doc, dict):
-        doc = frappe.get_doc(doc)
+        # from the form button: always work on the saved invoice
+        doc = frappe.get_doc(doc.get("doctype") or "Sales Invoice", doc.get("name"))
     if doc.doctype != "Sales Invoice":
         return
     if not frappe.db.get_value("Company", doc.company, "custom_uae_einvoice_enabled"):
         return  # UAE e-invoicing is switched off for this company
+    if method is None:
+        doc.check_permission("submit")
+
+    # MOGAS fork: UAE data lives in "UAE E-Invoice Submission", not on the invoice
+    ensure_record("Sales Invoice", doc.name, doc=doc)
+    hydrate(doc)
 
     try:
         settings = get_active_provider_settings(doc.company)
@@ -76,7 +84,7 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
         exchange_status = parsed.get("exchange_status")
         invoice_status = "Success" if parsed.get("success") else "Not Submitted"
 
-        doc.db_set("custom_submit_response", response_text)
+        set_state("Sales Invoice", doc.name, {"submit_response": response_text}, doc=doc)
         if status_code in (200, 201) and getattr(
             adapter, "AUTO_FETCH_DOCUMENTS_ON_SUBMIT", True
         ):
@@ -105,14 +113,14 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
                             )
                         elif retry_delay_seconds:
                             time.sleep(retry_delay_seconds)
-        doc.db_set("custom_uae_einvoice_status", invoice_status)
-       
         if not reporting_status and invoice_status == "Success":
             reporting_status = "pending"
+        state = {"uae_einvoice_status": invoice_status}
         if reporting_status:
-            doc.db_set("custom_reporting_status", reporting_status)
+            state["reporting_status"] = reporting_status
         if document_id:
-            doc.db_set("custom_document_id", document_id)
+            state["document_id"] = document_id
+        set_state("Sales Invoice", doc.name, state, doc=doc)
         frappe.db.commit()
         if status_code in (200, 201):
             success_log(
@@ -147,9 +155,10 @@ def bulk_send_invoices(invoices: list | str):
         try:
             # Load documents
             doc = frappe.get_doc("Sales Invoice", invoice)
+            doc.check_permission("submit")
             company_doc = frappe.get_doc("Company", doc.company)
 
-            status = doc.custom_uae_einvoice_status
+            status = get_state("Sales Invoice", invoice, ["uae_einvoice_status"]).uae_einvoice_status
 
             if status == "Success":
                 skipped.append(invoice)
@@ -160,7 +169,7 @@ def bulk_send_invoices(invoices: list | str):
                 success.append(invoice)
 
             elif doc.docstatus == 1 and company_doc.custom_uae_einvoice_enabled == 1:
-                generate_and_send_einvoice(doc)
+                generate_and_send_einvoice(doc, method="bulk")
                 success.append(invoice)
 
         except Exception as e:
