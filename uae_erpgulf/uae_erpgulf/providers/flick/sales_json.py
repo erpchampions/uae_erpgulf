@@ -31,17 +31,26 @@ def get_icv_code(invoice_number):
         frappe.throw(_("Regex error in getting ICV number: " + str(e)))
 
 
+
+def _first_tax(doc):
+    """MOGAS fork: the invoice's first tax row, or a 0 % row when there is
+    none (zero-rated / exempt / out-of-scope invoices, e.g. exports, often
+    carry no tax row; upstream crashed with IndexError)."""
+    if doc.get("taxes"):
+        return doc.taxes[0]
+    return frappe._dict(rate=0, included_in_print_rate=0)
+
 def get_line_extension_amount(sales_invoice_doc):
     """Calculates line extension amount based on whether taxes are included in print rate and if discount is applied.
     """
-    if not sales_invoice_doc.taxes or sales_invoice_doc.taxes[0].included_in_print_rate == 0:
+    if _first_tax(sales_invoice_doc).included_in_print_rate == 0:
         line_extension_amount = str(round(abs(sales_invoice_doc.total), 2))
     else:
         if sales_invoice_doc.discount_amount:
             line_extension_amount = str(
                 round(
                     abs(
-                        sales_invoice_doc.base_net_total
+                        sales_invoice_doc.net_total
                         + sales_invoice_doc.get("discount_amount", 0.0)
                     ),
                     2,
@@ -49,14 +58,14 @@ def get_line_extension_amount(sales_invoice_doc):
             )
         else:
             line_extension_amount = str(
-                round(abs(sales_invoice_doc.base_net_total), 2)
+                round(abs(sales_invoice_doc.net_total), 2)
             )
     return line_extension_amount
 
 
 def get_tax_exc(sales_invoice_doc):
     """Calculates tax exclusive amount based on whether taxes are included in print rate and if discount is applied."""
-    if sales_invoice_doc.taxes[0].included_in_print_rate == 0:
+    if _first_tax(sales_invoice_doc).included_in_print_rate == 0:
             tax_exclusive_amount = str(
                 round(
                     abs(
@@ -71,7 +80,7 @@ def get_tax_exc(sales_invoice_doc):
             tax_exclusive_amount = str(
                 round(
                     abs(
-                        sales_invoice_doc.base_net_total
+                        sales_invoice_doc.net_total
                         - sales_invoice_doc.get("discount_amount", 0.0)
                     ),
                     2,
@@ -81,7 +90,7 @@ def get_tax_exc(sales_invoice_doc):
             tax_exclusive_amount = str(
                 round(
                     abs(
-                        sales_invoice_doc.base_net_total
+                        sales_invoice_doc.net_total
                     ),
                     2,
                 )
@@ -90,19 +99,19 @@ def get_tax_exc(sales_invoice_doc):
 
 def get_tax_inclusive(sales_invoice_doc):
     """Calculates tax inclusive amount based on whether taxes are included in print rate and if discount is applied."""
-    if sales_invoice_doc.taxes[0].included_in_print_rate == 0:
+    if _first_tax(sales_invoice_doc).included_in_print_rate == 0:
             taxable_amount_1 = sales_invoice_doc.total - sales_invoice_doc.get(
                 "discount_amount", 0.0
             )
     else:
         taxable_amount_1 = (
-            sales_invoice_doc.base_net_total
+            sales_invoice_doc.net_total
             - sales_invoice_doc.get("discount_amount", 0.0)
         )
     tax_amount_without_retention = (
-        taxable_amount_1 * float(sales_invoice_doc.taxes[0].rate) / 100
+        taxable_amount_1 * float(_first_tax(sales_invoice_doc).rate) / 100
     )
-    if sales_invoice_doc.taxes[0].included_in_print_rate == 0:
+    if _first_tax(sales_invoice_doc).included_in_print_rate == 0:
         tax_inclusive_amount = str(
             round(
                 abs(
@@ -119,7 +128,7 @@ def get_tax_inclusive(sales_invoice_doc):
             tax_inclusive_amount = str(
                 round(
                     abs(
-                        sales_invoice_doc.base_net_total
+                        sales_invoice_doc.net_total
                         - sales_invoice_doc.get("discount_amount", 0.0)
                     )
                     + abs(tax_amount_without_retention),
@@ -130,7 +139,7 @@ def get_tax_inclusive(sales_invoice_doc):
             tax_inclusive_amount = str(
                 round(
                     abs(
-                        sales_invoice_doc.base_net_total
+                        sales_invoice_doc.net_total
                     )
                     + abs(tax_amount_without_retention),
                     2,
@@ -141,19 +150,19 @@ def get_tax_inclusive(sales_invoice_doc):
 
 def get_payable_amount(sales_invoice_doc):
     """Calculates payable amount based on whether taxes are included in print rate and if discount is applied."""
-    if sales_invoice_doc.taxes[0].included_in_print_rate == 0:
+    if _first_tax(sales_invoice_doc).included_in_print_rate == 0:
             taxable_amount_1 = sales_invoice_doc.total - sales_invoice_doc.get(
                 "discount_amount", 0.0
             )
     else:
         taxable_amount_1 = (
-            sales_invoice_doc.base_net_total
+            sales_invoice_doc.net_total
             - sales_invoice_doc.get("discount_amount", 0.0)
         )
     tax_amount_without_retention = (
-        taxable_amount_1 * float(sales_invoice_doc.taxes[0].rate) / 100
+        taxable_amount_1 * float(_first_tax(sales_invoice_doc).rate) / 100
     )
-    if sales_invoice_doc.taxes[0].included_in_print_rate == 0:
+    if _first_tax(sales_invoice_doc).included_in_print_rate == 0:
         total_amount = round(
             abs(
                 sales_invoice_doc.total
@@ -166,7 +175,7 @@ def get_payable_amount(sales_invoice_doc):
         if sales_invoice_doc.discount_amount ==0:
             total_amount = round(
                 abs(
-                    sales_invoice_doc.base_net_total
+                    sales_invoice_doc.net_total
                     - sales_invoice_doc.get("discount_amount", 0.0)
                 )
                 + abs(tax_amount_without_retention),
@@ -175,7 +184,7 @@ def get_payable_amount(sales_invoice_doc):
         else:
             total_amount=round(
                 abs(
-                    sales_invoice_doc.base_net_total
+                    sales_invoice_doc.net_total
                 )
                 + abs(tax_amount_without_retention),
                 2,
@@ -226,28 +235,29 @@ def get_invoice_period(sales_invoice_doc):
         "DLY", "WKY", "Q15", "MTH", "Q45",
         "Q60", "QTR", "YRL", "HYR", "OTH"
     }
+    # MOGAS fork (per Flick docs): invoice_period is optional and only
+    # required for summary invoices (transaction type position 4, ibr-138-ae).
+    # Upstream always sent posting -> due date with a frequency (and checked
+    # the deemed-supply position for summaries), so every invoice claimed a
+    # billing period. Now: sent only when a frequency was chosen or for a
+    # summary invoice.
     start_date = sales_invoice_doc.posting_date
     end_date = sales_invoice_doc.due_date
     description_code = sales_invoice_doc.custom_frequency_billing_code_list
-    if start_date and end_date and not description_code:
-        frappe.throw(_(
-            "Please select a Frequency of Billing (Invoice Period Description Code)"
-        ))
-    if description_code and description_code not in ALLOWED_DESCRIPTION_CODES:
-        frappe.throw(_(
-            f"Invalid Invoice Period Description Code: {description_code}"
-        ))
-    if end_date and not start_date:
-        frappe.throw(_(             
-            "Invoice Period Start Date is mandatory when End Date is provided"
-        ))
+    tx_code = (getattr(sales_invoice_doc, "custom_invoice_transaction_type_code", None) or "").split(":")[0].strip()
+    is_summary = len(tx_code) >= 4 and tx_code[3] == "1"
 
-    if getattr(sales_invoice_doc, "custom_invoice_transaction_type_code", None) == "X1XXXXX : Deemed supply transaction":
-        if not start_date or not end_date or not description_code:
-            frappe.throw(_(
-                "Invoice Period (Start Date, End Date and Frequency) "
-                "is mandatory for Summary Invoices"
-            ))
+    if description_code and description_code not in ALLOWED_DESCRIPTION_CODES:
+        frappe.throw(_("Invalid Invoice Period Description Code: {0}").format(description_code))
+    if is_summary and not (start_date and end_date and description_code):
+        frappe.throw(_(
+            "Invoice Period (Start Date, End Date and Frequency of Billing) "
+            "is mandatory for Summary Invoices"
+        ))
+    if not description_code and not is_summary:
+        return None
+    if end_date and not start_date:
+        frappe.throw(_("Invoice Period Start Date is mandatory when End Date is provided"))
     if not start_date and not end_date:
         return None
 
@@ -320,14 +330,11 @@ def get_currency_exchange_rate(sales_invoice_doc):
     """
     Returns currency exchange rate (cbc:ExchangeRate) for AED conversion
     """
-    invoice_currency = sales_invoice_doc.currency
-    if invoice_currency == "AED":
-        return None
-    exchange_rate = sales_invoice_doc.conversion_rate
-    if not exchange_rate:
-        frappe.throw(_("Currency exchange rate is mandatory when invoice currency is not AED"))
-    exchange_rate = Decimal(exchange_rate).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-    return float(exchange_rate)
+    # MOGAS fork: invoice currency -> AED (not -> company currency); see aed_rate.py
+    from uae_erpgulf.uae_erpgulf.aed_rate import get_aed_rate
+
+    return get_aed_rate(sales_invoice_doc)
+
 
 
 
@@ -380,14 +387,11 @@ def validate_receiving_party_fields(
         errors.append("IBR-144-ae: Address line 1 (IBT-050) MUST be provided")
     if not address_data.city:
         errors.append("IBR-144-ae: City (IBT-052) MUST be provided")
-    if not address_data.emirate:
+    # MOGAS fork (per Flick docs): Emirate only for UAE addresses; post code optional
+    if (address_data.country or "").strip().lower() in ("united arab emirates", "uae", "ae") and not address_data.emirate:
         errors.append("IBR-144-ae: Country subdivision / Emirate (IBT-054) MUST be provided")
-    if not address_data.pincode:
-        errors.append("postal zone MUST be provided")
     if not address_data.country:
         errors.append("IBR-008: Country code (IBT-055) MUST be provided")
-    if not address_data.email_id:
-        errors.append("IBR-011: Electronic email id (IBT-049) MUST be provided")
     if is_credit_note or is_out_of_scope:
         if not customer_doc.custom_trade_license_number:
             errors.append(
@@ -437,15 +441,15 @@ def get_item_data(sales_invoice_doc, vat_rate):
             frappe.throw(_(f"Invoiced quantity must be greater than zero for item {item.item_name}"))
 
         if not item.custom_item_type_codes:
-            frappe.throw(_("Item type (Goods / Services / Both) missing for item{0}", [item.item_name]))
+            frappe.throw(_("Item type (Goods / Services / Both) missing for item {0}").format(item.item_name))
         if item.custom_item_type_codes == "G - Goods" and not item.custom_hs_code_:
-            frappe.throw(_("HS code missing for item{0}", [item.item_name]))
+            frappe.throw(_("HS code missing for item {0}").format(item.item_name))
 
         if item.custom_item_type_codes == "S - Services" and not item.custom_sac_code:
-            frappe.throw(_("SAC code missing for item{0}", [item.item_name]))
+            frappe.throw(_("SAC code missing for item {0}").format(item.item_name))
 
         if item.custom_item_type_codes == "B - Both" and (not item.custom_hs_code_ or not item.custom_sac_code):
-            frappe.throw(_("HS/SAC code missing for item{0}", [item.item_name]))
+            frappe.throw(_("HS/SAC code missing for item {0}").format(item.item_name))
 
         # If any item has an item tax template, enforce it for all
         if any_item_tax_template and not item.item_tax_template:
@@ -520,6 +524,13 @@ def get_item_data(sales_invoice_doc, vat_rate):
             # "line_extension_amount": get_item_line_extension_amount(item)
         }
         vat_category_code = get_vat_category_code(vat_category)
+        if vat_category_code == "S" and not Decimal(str(tax_rate or 0)):
+            # MOGAS fork: a 0 % standard-rated line is never right
+            frappe.throw(_(
+                "Item {0}: VAT category is Standard rated but the invoice has no VAT. Add the VAT "
+                "tax row, or choose Zero rated / Exempt / Out of scope in UAE E-Invoice Details "
+                "(or on the Item Tax Template)."
+            ).format(item.item_name))
 
         if vat_category_code == "E" and exemption_reason:
             invoice_line["vat_exemption_reason_code"] = exemption_reason.split(" - ")[0]
@@ -530,6 +541,32 @@ def get_item_data(sales_invoice_doc, vat_rate):
 
     return invoice, total_net, total_tax
         
+def get_export_delivery(doc, buyer_address):
+    """Deliver-to block for an export: the Shipping Address, else the
+    buyer's address. Its country must not be the UAE (ibr-152-ae)."""
+    address = buyer_address
+    if doc.get("shipping_address_name"):
+        address = frappe.get_doc("Address", doc.shipping_address_name)
+    country = country_code_mapping().get((address.country or "").lower()) if address else None
+    if not address or not address.address_line1 or not address.city or not country:
+        frappe.throw(_("Export invoice: a delivery address with line 1, city and country is required "
+                       "(Shipping Address, or the customer's address)."))
+    if country == "AE":
+        frappe.throw(_("Export invoice: the delivery address must be outside the UAE (ibr-152-ae)."))
+    delivery = {
+        "address": {
+            "street_address": address.address_line1,
+            "additional_street_address": address.address_line2,
+            "city_address": address.city,
+            "postal_zone": address.pincode,
+            "country_code": country,
+        }
+    }
+    if doc.get("shipping_address_name") and doc.get("customer_name"):
+        delivery["party_name"] = doc.customer_name
+    return delivery
+
+
 def get_invoice_transaction_metadata(doc):
     """Extracts the invoice transaction metadata bits from the custom field and returns a dict of flags for each type."""
     code = (doc.custom_invoice_transaction_type_code or "").strip()
@@ -734,7 +771,9 @@ def build_uae_invoice_json(invoice_number):
                 "emirates_code" : get_uae_emirate_code(address_data.emirate),
                 "additional_address_lines":  address_data.address_line2,
                 "country_code": country_code1 ,
-                "vat_number": customer_doc.tax_id ,
+                # MOGAS fork: IBT-048 must be a UAE TRN (15 digits, ibr-132-ae);
+                # a foreign buyer's tax id would be rejected, so only for AE
+                "vat_number": customer_doc.tax_id if country_code1 == "AE" else None,
                 "legal_name":  customer_doc.customer_name,
                 # "identifiers":  [
                 #         {
@@ -866,12 +905,17 @@ def build_uae_invoice_json(invoice_number):
     total_net = Decimal("0")
     total_tax = Decimal("0")
 
-    vat_rate = Decimal(sales_invoice_doc.taxes[0].rate if sales_invoice_doc.taxes else 0)
+    vat_rate = Decimal(_first_tax(sales_invoice_doc).rate or 0)
 
     invoice_lines_data, total_net, total_tax = get_item_data(sales_invoice_doc, vat_rate)
 
     # Assign invoice lines to main invoice
     invoice["invoice_lines"] = invoice_lines_data["invoice_lines"]
+
+    # MOGAS fork: exports need a foreign delivery address (ibr-152-ae)
+    if invoice.get("metadata", {}).get("is_export"):
+        invoice["delivery"] = get_export_delivery(sales_invoice_doc, address_data)
+
 
 
     invoice["invoice_totals"] = {

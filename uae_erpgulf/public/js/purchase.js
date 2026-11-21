@@ -30,6 +30,9 @@ frappe.ui.form.on("Purchase Invoice", {
     before_submit(frm) {
         return uae_erpgulf_einvoice.before_submit(frm);
     },
+    before_workflow_action(frm) {
+        return uae_erpgulf_einvoice.before_workflow_action(frm);
+    },
 });
 
 function get_fta_incoming_invoices(frm) {

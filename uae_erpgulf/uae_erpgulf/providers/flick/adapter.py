@@ -2,7 +2,7 @@
 
 import json
 import frappe
-from uae_erpgulf.uae_erpgulf.einvoice_record import find_invoice_by_document_id, set_state
+from uae_erpgulf.uae_erpgulf.einvoice_record import find_invoice_by_document_id
 import requests
 from frappe import _
 from frappe.utils import now_datetime
@@ -177,10 +177,10 @@ class FlickAdapter(BaseAdapter):
         base_url = self.get_base_url()
         headers = self.get_auth_headers({"Content-Type": "application/json"})
 
-        if doctype == "Purchase Invoice":
-            url = f"{base_url}/v1/{participant_id}/simulate/incoming"
-        else:
-            url = f"{base_url}/v1/{participant_id}/documents"
+        # MOGAS fork: self-billed Purchase Invoices go to the same documents
+        # endpoint (flags.is_selfbilled is set by purchase_json), per Flick's
+        # docs. Upstream used /simulate/incoming, a sandbox simulation.
+        url = f"{base_url}/v1/{participant_id}/documents"
         payload = {"document": json_data}
 
         response = requests.post(url, headers=headers, json=payload, timeout=120)
@@ -414,12 +414,44 @@ class FlickAdapter(BaseAdapter):
         }
 
 
+MAX_WEBHOOK_BYTES = 256 * 1024
+
+
+def enqueue_status_refresh(document_id):
+    """Queue an authenticated status pull for the invoice(s) carrying this
+    Flick Document ID. Returns the queued (doctype, name) pairs."""
+    queued = []
+    for doctype in ("Sales Invoice", "Purchase Invoice"):
+        name = find_invoice_by_document_id(doctype, document_id)
+        if not name:
+            continue
+        frappe.enqueue(
+            "uae_erpgulf.uae_erpgulf.status_sync.refresh_invoice_status",
+            queue="short",
+            job_id=f"uae_einvoice_status::{doctype}::{name}",
+            deduplicate=True,
+            enqueue_after_commit=True,
+            doctype=doctype,
+            invoice_name=name,
+        )
+        queued.append((doctype, name))
+    return queued
+
+
 @frappe.whitelist(allow_guest=True)  # nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method
 def flick_webhook_listener():
     """Listener for Flick API webhooks. Logs incoming data and updates invoice status."""
     try:
 
+        # guest endpoint: refuse oversized bodies before parsing / logging
+        if (frappe.request.content_length or 0) > MAX_WEBHOOK_BYTES:
+            frappe.local.response.http_status_code = 413
+            return {"acknowledged": False, "processed": False}
+
         raw_data = frappe.request.get_data(as_text=True)
+        if len(raw_data) > MAX_WEBHOOK_BYTES:
+            frappe.local.response.http_status_code = 413
+            return {"acknowledged": False, "processed": False}
         data = json.loads(raw_data)
 
         # Extract top-level fields
@@ -449,19 +481,15 @@ def flick_webhook_listener():
         })
 
         doc.insert(ignore_permissions=True)
-        if document_id and reporting_status:
 
-            # Sales Invoice
-            sales_invoice = find_invoice_by_document_id("Sales Invoice", document_id)
-
-            if sales_invoice:
-                set_state("Sales Invoice", sales_invoice, {"reporting_status": reporting_status})
-
-            # Purchase Invoice
-            purchase_invoice = find_invoice_by_document_id("Purchase Invoice", document_id)
-
-            if purchase_invoice:
-                set_state("Purchase Invoice", purchase_invoice, {"reporting_status": reporting_status})
+        # MOGAS fork: this endpoint is guest-accessible and Flick's delivery
+        # signature is not verified, so the status in the body is NOT
+        # trusted. The webhook only says "this document changed"; the real
+        # status is fetched from Flick with our own credentials in a
+        # background job (same path as the Get Status button / status sync).
+        # A forged call can at most trigger a harmless status refresh.
+        if document_id:
+            enqueue_status_refresh(document_id)
 
         frappe.db.commit()  # nosemgrep: frappe-manual-commit
 

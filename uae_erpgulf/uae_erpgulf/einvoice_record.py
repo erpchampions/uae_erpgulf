@@ -55,19 +55,18 @@ ITEM_FIELDS = ("custom_item_type_codes", "custom_hs_code_", "custom_sac_code")
 
 # Upstream's effective defaults, kept so payloads are unchanged. Upstream's
 # Select custom fields had no blank option, so Frappe filled in the first
-# one: VAT category "S" and frequency "DLY" were sent on every invoice (the
-# Flick builder requires a frequency whenever posting + due date are set).
+# one: VAT category "S" went on every invoice. Frequency of billing "DLY" is
+# no longer defaulted: per Flick's docs the invoice period is optional except
+# for summary invoices, and the builder now omits it when none is chosen.
 # Other Selects here have a blank option and stay empty unless chosen.
 DEFAULTS = {
 	"Sales Invoice": {
 		"vat_category": "S - Standard rated",
-		"frequency_billing_code_list": "DLY",
 		"invoice_note": "Tax Invoice",
 		"uae_einvoice_status": "Not Submitted",
 	},
 	"Purchase Invoice": {
 		"vat_category": "S - Standard rated",
-		"frequency_billing_code_list": "DLY",
 		"invoice_note": "Tax Invoice Reporting",
 		"uae_einvoice_status": "Not Submitted",
 	},

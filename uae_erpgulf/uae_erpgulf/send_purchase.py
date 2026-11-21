@@ -149,6 +149,11 @@ def generate_and_send_einvoice(doc: Union[Document, str], method: Optional[str] 
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "UAE eInvoice Submit Error")
+        # MOGAS fork: keep the reason on the record, not only in the Error Log
+        try:
+            set_state("Purchase Invoice", doc.name, {"submit_response": "NOT SENT: " + frappe.utils.strip_html(str(e))[:1000]})
+        except Exception:
+            pass
         
         frappe.msgprint(
             _("E-Invoice processing failed: {0}").format(str(e))

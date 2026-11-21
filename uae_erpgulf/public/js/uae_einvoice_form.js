@@ -150,6 +150,40 @@ window.uae_erpgulf_einvoice = window.uae_erpgulf_einvoice || (function () {
 		});
 	}
 
+	// MOGAS submits invoices through workflow actions (e.g. "Submit" ->
+	// Approved), which never fire before_submit. Show the same dialog when
+	// the chosen action leads to a submitted (docstatus 1) state.
+	function workflow_action_submits(frm) {
+		const wf = frappe.workflow.workflows[frm.doctype];
+		const action = frm.selected_workflow_action;
+		if (!wf || !action) return false;
+		const current = frm.doc[wf.workflow_state_field];
+		return (wf.transitions || [])
+			.filter((t) => t.state === current && t.action === action)
+			.some((t) => {
+				const next = (wf.states || []).find((s) => s.state === t.next_state);
+				return next && cint(next.doc_status) === 1;
+			});
+	}
+
+	function before_workflow_action(frm) {
+		if (frm.doc.docstatus !== 0 || !workflow_action_submits(frm)) return;
+		return get_info(frm).then((info) => {
+			if (!info.enabled) return;
+			// Frappe freezes the screen before this event; the dialog needs it unfrozen
+			frappe.dom.unfreeze();
+			const label = __("Save & {0}", [__(frm.selected_workflow_action)]);
+			return open_dialog(frm, info, label).then((ok) => {
+				if (!ok) {
+					frm.selected_workflow_action = null;
+					// rejecting stops apply_workflow; nothing was changed
+					return Promise.reject(new Error("UAE e-invoice details not confirmed"));
+				}
+				frappe.dom.freeze();
+			});
+		});
+	}
+
 	// ------------------------------------------------------------ refresh
 	function status_badge(values) {
 		const einvoice = (values.uae_einvoice_status || "").toUpperCase();
@@ -316,5 +350,5 @@ window.uae_erpgulf_einvoice = window.uae_erpgulf_einvoice || (function () {
 		});
 	}
 
-	return { RECORD, get_info, before_submit, refresh, open_dialog };
+	return { RECORD, get_info, before_submit, before_workflow_action, refresh, open_dialog };
 })();

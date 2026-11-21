@@ -7,4 +7,7 @@ frappe.ui.form.on("Sales Invoice", {
 	before_submit(frm) {
 		return uae_erpgulf_einvoice.before_submit(frm);
 	},
+	before_workflow_action(frm) {
+		return uae_erpgulf_einvoice.before_workflow_action(frm);
+	},
 });

@@ -191,6 +191,11 @@ def _pi(company, submit=False, self_billed=False):
 		"expense_account": frappe.db.get_value("Account", {"company": company, "root_type": "Expense", "is_group": 0}),
 		"cost_center": frappe.db.get_value("Cost Center", {"company": company, "is_group": 0}),
 	})
+	vat = frappe.db.get_value("Account", {"company": company, "account_name": "VAT 5%"})
+	if vat:
+		pi.append("taxes", {"charge_type": "On Net Total", "account_head": vat, "rate": 5, "description": "VAT 5%",
+			"category": "Total", "add_deduct_tax": "Add",
+			"cost_center": frappe.db.get_value("Cost Center", {"company": company, "is_group": 0})})
 	pi.insert()
 	if self_billed:
 		save_inputs("Purchase Invoice", pi.name, {"submit_to_fta": 1, "vat_category": "S - Standard rated"})
@@ -261,6 +266,32 @@ def run():
 	# 5. webhook-style lookup by document id
 	check("find_invoice_by_document_id", er.find_invoice_by_document_id("Sales Invoice", f"DOC-{si.name}") == si.name)
 
+	# 5b. forged Flick webhook: body status is ignored, an authenticated
+	# status pull is queued instead
+	import json as _json
+	from werkzeug.test import EnvironBuilder
+	from werkzeug.wrappers import Request
+	from uae_erpgulf.uae_erpgulf.providers.flick import adapter as flick_adapter
+
+	queued, real_enqueue = [], frappe.enqueue
+	frappe.enqueue = lambda method, **kw: queued.append((method, kw))
+	saved_request = getattr(frappe.local, "request", None)
+	try:
+		body = _json.dumps({"event": "document.reporting.reported", "participant_id": "x",
+							"data": {"document_id": f"DOC-{si.name}", "reporting_status": "forged"}})
+		frappe.local.request = Request(EnvironBuilder(method="POST", data=body, content_type="application/json").get_environ())
+		flick_adapter.flick_webhook_listener()
+		frappe.local.request = Request(EnvironBuilder(method="POST", data="x" * (flick_adapter.MAX_WEBHOOK_BYTES + 1)).get_environ())
+		big = flick_adapter.flick_webhook_listener()
+	finally:
+		frappe.enqueue = real_enqueue
+		frappe.local.request = saved_request
+	check("forged webhook status not stored", _rec("Sales Invoice", si.name).reporting_status == "reported",
+		  _rec("Sales Invoice", si.name).reporting_status)
+	check("webhook queues authenticated status pull",
+		  queued and queued[0][0].endswith("status_sync.refresh_invoice_status") and queued[0][1]["invoice_name"] == si.name, queued)
+	check("oversized webhook body rejected", big == {"acknowledged": False, "processed": False}, big)
+
 	# 6. non-UAE company untouched
 	before = len(FakeAdapter.seen)
 	other = _si(OTHER, submit=True)
@@ -321,11 +352,56 @@ def run():
 	# 13. real Flick payload builder sees hydrated values
 	try:
 		from uae_erpgulf.uae_erpgulf.providers.flick import sales_json
+		# the invoice is flagged Export: deliver to a foreign address (rolled back)
+		ship = frappe.get_doc({"doctype": "Address", "address_title": "UAE Test Ship TZ", "address_type": "Shipping",
+			"address_line1": "Port Rd 1", "city": "Dar es Salaam", "country": "Tanzania",
+			"links": [{"link_doctype": "Customer", "link_name": "UAE Test Customer"}]}).insert()
+		frappe.db.set_value("Sales Invoice", si.name, "shipping_address_name", ship.name)
 		payload = sales_json.build_uae_invoice_json(si.name)
 		blob = json.dumps(payload, default=str)
 		check("Flick builder: hydrated values in payload", "27101943" in blob, blob[:300])
+		p = payload.get("document", payload)
+		check("Flick export: metadata.is_export + foreign delivery address",
+			  p["metadata"]["is_export"] and p["delivery"]["address"]["country_code"] == "TZ", p.get("delivery"))
+		frappe.db.set_value("Sales Invoice", si.name, "shipping_address_name", frappe.db.get_value(
+			"Address", {"address_title": "UAE Cust"}))
+		try:
+			sales_json.build_uae_invoice_json(si.name)
+			check("Flick export: UAE delivery address refused", False)
+		except frappe.ValidationError as e:
+			check("Flick export: UAE delivery address refused", "outside the UAE" in str(e), str(e))
 	except Exception as e:
 		check("Flick builder ran", False, f"{type(e).__name__}: {e}")
+
+	# 13b. Flick self-billed PI payload follows Flick's documented format
+	try:
+		from uae_erpgulf.uae_erpgulf.providers.flick import purchase_json
+		frappe.db.set_value("Supplier", sb.supplier, {"tax_id": "100000000000003", "custom_trade_license_number": "TL-1"})  # seller ids (rolled back)
+		p = purchase_json.build_uae_invoice_json(sb.name)
+		p = p.get("document", p)
+		check("Flick self-billed PI: 380 + is_selfbilled, supplier=issuing, company=receiving",
+			  p.get("document_type") == "380" and (p.get("flags") or {}).get("is_selfbilled") is True
+			  and p["issuing_party"]["legal_name"] == sb.supplier_name
+			  and p["receiving_party"]["legal_name"] == frappe.db.get_value("Company", sb.company, "company_name")
+			  and p["receiving_party"]["peppol_id"] == "TEST-PID",
+			  json.dumps({k: p.get(k) for k in ("document_type", "flags", "issuing_party", "receiving_party")}, default=str)[:600])
+	except Exception as e:
+		check("Flick self-billed PI builder ran", False, f"{type(e).__name__}: {e}")
+
+	# 13c. AED exchange rate: invoice currency -> AED, not -> company currency
+	from uae_erpgulf.uae_erpgulf.aed_rate import get_aed_rate
+	aed_co = frappe._dict(doctype="Sales Invoice", company=UAE1, currency="USD", conversion_rate=3.67, posting_date=nowdate())
+	real_cv = frappe.get_cached_value
+	try:
+		frappe.get_cached_value = lambda dt, n, f, *a, **k: "USD" if (dt, f) == ("Company", "default_currency") else real_cv(dt, n, f, *a, **k)
+		usd_usd = get_aed_rate(frappe._dict(aed_co, conversion_rate=1.0))
+		eur_usd = get_aed_rate(frappe._dict(aed_co, currency="EUR", conversion_rate=1.1))
+	finally:
+		frappe.get_cached_value = real_cv
+	check("AED rate: AED company uses invoice rate", get_aed_rate(aed_co) == 3.67)
+	check("AED rate: USD company, USD invoice -> 3.6725 (not 1.0)", usd_usd == 3.6725, usd_usd)
+	check("AED rate: USD company, EUR invoice -> 1.1 x 3.6725", eur_usd == round(1.1 * 3.6725, 6), eur_usd)
+	check("AED rate: AED invoice -> none", get_aed_rate(frappe._dict(aed_co, currency="AED")) is None)
 
 	# 14. real Marmin payload builder
 	try:

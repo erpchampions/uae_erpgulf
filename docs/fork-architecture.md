@@ -68,7 +68,14 @@ Companies without UAE e-invoicing see no dialog, no buttons, no indicator.
 | Imported supplier invoices | Document ID / status / payment means go on the record (`direction = Incoming`). |
 | Tooltips / HTML ribbon | Removed with the fields; help text is on the dialog. |
 | Creating a Company | Upstream validated the ASP on **every** Company; its Select has no blank option, so every new company (any country) got an ASP without an adapter and could not be saved. Now only validated when UAE e-invoicing is enabled on that company. |
-| Select defaults | Upstream's invoice Selects had no blank option, so Frappe silently stored the first option (e.g. exemption reason *DL8.46.1*, credit-note reason *Cancellation*). On the record these are blank unless chosen; VAT category *S* and frequency *DLY* stay as explicit defaults because payloads (Flick) need them. |
+| Flick webhook | Upstream stored whatever status the (unauthenticated) webhook body said. Now the body is only a trigger: an authenticated status pull is queued; bodies over 256 KB are refused. |
+| Flick self-billed Purchase Invoice | Upstream posted to `/simulate/incoming` (sandbox simulation). Now `/documents` with 380/381 + `flags.is_selfbilled`, supplier as seller, company as buyer, per Flick's docs. Needs a sandbox confirmation. |
+| Workflow submit | Invoices submitted through a workflow action (MOGAS) get the UAE dialog too (`before_workflow_action`). |
+| Flick: currency | Exchange rate is invoice currency → AED (upstream: → company currency, wrong for USD-books companies). Totals no longer mix company-currency amounts. |
+| Flick: no tax row / exports | Invoices without a tax row build at 0 % (Standard rated at 0 % is refused); exports send `metadata.is_export` + `delivery`; buyer Emirate only for UAE addresses, post code / email optional, buyer TRN only for UAE buyers. |
+| Flick: invoice period | Sent only when a Frequency of Billing is chosen or for summary invoices; `DLY` no longer defaulted. |
+| Failed send | Reason stored on the record's `submit_response` (prefixed `NOT SENT:`). |
+| Select defaults | Upstream's invoice Selects had no blank option, so Frappe silently stored the first option (e.g. exemption reason *DL8.46.1*, credit-note reason *Cancellation*). On the record these are blank unless chosen; VAT category *S* stays the explicit default; frequency is blank unless chosen. |
 
 ## 6. Install / upgrade
 
@@ -88,8 +95,15 @@ Invoice','Sales Invoice Item','Purchase Invoice Item') AND module='uae_erpgulf'`
 
 ## 7. Testing
 
-`docs/testing/mogas_e2e_check.py`: 27 checks on a throwaway site (fake ASP, real Flick + Marmin
+`docs/testing/mogas_e2e_check.py`: 37 checks on a throwaway site (fake ASP, real Flick + Marmin
 payload builders). Verified 2026-11-19 on Frappe 15.108.0 / ERPNext 15.108.3 (MOGAS prod
-versions): 27/27, plus a browser run of the Submit dialog, indicator and buttons on a UAE company
+versions): 27/27; 37/37 after the 2026-11-21 changes, plus a browser run of the Submit dialog, indicator and buttons on a UAE company
 and no UAE UI on a non-UAE company.
 
+
+`docs/testing/mogas_readiness_check.py`: read-only master-data check for a real site (customers,
+items, tax templates, modes of payment, companies the Flick builder would refuse).
+
+`docs/testing/mogas_uat_check.py` + `mogas_uat_ui_check.py`: on a restored copy of MOGAS
+production (outbound HTTP blocked, fake ASP, real workflow, real Accounts User); results in
+`docs/MOGAS_UAT_FINDINGS.md`.
